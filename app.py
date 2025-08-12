@@ -21,13 +21,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# Add CORS middleware for public access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers
 )
 
 # Initialize services
@@ -59,10 +60,21 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
+    import socket
+    try:
+        # Get local IP address
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+    except:
+        local_ip = "unknown"
+    
     return {
         "status": "healthy",
         "service": "Street View AI Processing API",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "local_ip": local_ip,
+        "port": int(os.environ.get("PORT", 8000)),
+        "public_url": f"http://{local_ip}:{os.environ.get('PORT', 8000)}"
     }
 
 @app.post("/process-streetview")
@@ -142,7 +154,13 @@ async def process_streetview(request: ProcessRequest):
         ai_session_path = f"{session_dir}/1.jpg"
         shutil.copy2(ai_processed_path, ai_session_path)
 
-        base64_encoded_image = encode_image_to_base64(ai_session_path)
+        base64_encoded_images = []
+        for i in range(1, 5):
+            image_path = f"{session_dir}/{i}.jpg"
+            if os.path.exists(image_path):
+                base64_encoded_images.append(encode_image_to_base64(image_path))
+            else:
+                base64_encoded_images.append(None)
         
         # Return results
         return {
@@ -157,7 +175,8 @@ async def process_streetview(request: ProcessRequest):
                         "angle": img['angle'],
                         "filepath": img['filepath'],
                         "success": img['success'],
-                        "ai_processed": i == 0  # First image is AI processed
+                        "ai_processed": i == 0,  # First image is AI processed
+                        "base64_encoded": base64_encoded_images[i]
                     } for i, img in enumerate(saved_images)
                 ],
                 "total_captured": len(successful_images)
@@ -252,4 +271,11 @@ async def delete_session(session_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    # Run on all interfaces for public access
+    uvicorn.run(
+        app, 
+        host="0.0.0.0",  # Allow external connections
+        port=int(os.environ.get("PORT", 8000)),
+        access_log=True,  # Enable access logging
+        log_level="info"
+    )
