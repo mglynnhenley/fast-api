@@ -54,8 +54,41 @@ class ProcessRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
-    return {"message": "Street View AI Processing API is running", "status": "healthy"}
+    """API information endpoint"""
+    return {
+        "message": "Street View AI Processing API is running",
+        "status": "healthy",
+        "endpoints": {
+            "process_streetview": "POST /process-streetview",
+            "health": "GET /health",
+            "docs": "GET /docs",
+            "download": "GET /download/{session_id}/{image_number}",
+            "session_info": "GET /sessions/{session_id}"
+        },
+        "usage": {
+            "example_request": {
+                "address": "Times Square, New York, NY",
+                "prompt": "Add a giant robot walking down the street",
+                "angles": [0, 90, 180, 270]
+            },
+            "example_response": {
+                "session_id": "uuid",
+                "status": "completed",
+                "results": {
+                    "images": [
+                        {
+                            "number": 1,
+                            "angle": 0,
+                            "filepath": "path/to/image",
+                            "success": True,
+                            "ai_processed": True,
+                            "base64_encoded": "base64_string"
+                        }
+                    ]
+                }
+            }
+        }
+    }
 
 @app.get("/health")
 async def health_check():
