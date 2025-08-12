@@ -1,11 +1,14 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import os
 import shutil
-from typing import Dict, Any
+import base64
+from typing import List
 import uuid
-from services.staged_merge_service import StagedMergeService
+from services.street_view_service import StreetViewService
+from services.black_forest_api import process_image_with_prompt
 import logging
 
 # Configure logging
@@ -13,57 +16,63 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Image Processing API",
-    description="API for staged image merging and person swapping",
+    title="Street View AI Processing API",
+    description="API for getting Street View images and processing with Black Forest Labs AI",
     version="1.0.0"
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this properly for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize the service
-staged_merge_service = StagedMergeService()
+# Initialize services
+street_view_service = StreetViewService()
 
 # Ensure output directory exists
 os.makedirs("output", exist_ok=True)
-os.makedirs("uploads", exist_ok=True)
+
+def encode_image_to_base64(filepath: str) -> str:
+    """Encode an image file to base64 string"""
+    try:
+        with open(filepath, 'rb') as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+            return encoded_string
+    except Exception as e:
+        logger.error(f"Error encoding image {filepath}: {str(e)}")
+        return ""
+
+class ProcessRequest(BaseModel):
+    address: str
+    prompt: str
+    angles: List[int] = [0, 90, 180, 270]  # Default to 4 cardinal directions
 
 @app.get("/")
 async def root():
     """Health check endpoint"""
-    return {"message": "Image Processing API is running", "status": "healthy"}
+    return {"message": "Street View AI Processing API is running", "status": "healthy"}
 
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
     return {
         "status": "healthy",
-        "service": "Image Processing API",
+        "service": "Street View AI Processing API",
         "version": "1.0.0"
     }
 
-@app.post("/process-images")
-async def process_images(
-    background_image: UploadFile = File(...),
-    person_image: UploadFile = File(...),
-    add_person_prompt: str = "Add a realistic person to this scene in a natural pose. The person should be doing something interesting but believable. Keep the background, lighting, and environment exactly as they are. Only add the person, do not change anything else in the image.",
-    composite_prompt: str = "Create a side-by-side comparison by placing the first image on the left and the second image on the right, with equal spacing and the same height. Make it look like a before/after or comparison layout.",
-    swap_prompt: str = "This is a side-by-side composite image. I need you to: 1) Take the person's appearance from the RIGHT side image, 2) Apply that person's appearance to the person on the LEFT side, 3) Keep the LEFT side background, pose, and scene exactly as they are, 4) Only change the person's appearance, not the environment, 5) Return ONLY the left side image with the updated person. The result should be the left side scene with the right side person's appearance."
-):
+@app.post("/process-streetview")
+async def process_streetview(request: ProcessRequest):
     """
-    Process images through the staged merge pipeline
+    Process Street View images with AI
     
-    - **background_image**: The background/scene image
-    - **person_image**: The person source image
-    - **add_person_prompt**: Prompt for adding person to background
-    - **composite_prompt**: Prompt for creating side-by-side composite
-    - **swap_prompt**: Prompt for swapping person appearance
+    - **address**: The address to get Street View images for
+    - **prompt**: AI editing prompt for the first image
+    - **angles**: List of angles to capture (default: [0, 90, 180, 270])
     """
     try:
         # Generate unique session ID
@@ -71,72 +80,119 @@ async def process_images(
         session_dir = f"output/{session_id}"
         os.makedirs(session_dir, exist_ok=True)
         
-        # Save uploaded files
-        background_path = f"{session_dir}/background.jpg"
-        person_path = f"{session_dir}/person.jpg"
+        logger.info(f"Processing session {session_id} for address: {request.address}")
         
-        with open(background_path, "wb") as buffer:
-            shutil.copyfileobj(background_image.file, buffer)
+        # Step 1: Get Street View images at multiple angles
+        print(f"🗺️  Getting Street View images for: {request.address}")
+        print(f"📐 Angles: {request.angles}")
         
-        with open(person_path, "wb") as buffer:
-            shutil.copyfileobj(person_image.file, buffer)
-        
-        logger.info(f"Processing session {session_id}")
-        
-        # Process images using staged merge service
-        results = staged_merge_service.staged_merge_with_kontext(
-            image_a_path=background_path,
-            image_b_path=person_path,
-            add_person_prompt=add_person_prompt,
-            composite_prompt=composite_prompt,
-            swap_prompt=swap_prompt
+        street_view_results = street_view_service.get_street_view_at_degrees(
+            request.address, 
+            request.angles, 
+            '1024x768'
         )
         
-        # Return file paths and session info
+        # Save images and collect results
+        saved_images = []
+        for i, result in enumerate(street_view_results):
+            if result['success']:
+                # Generate filename with number (1,2,3,4 for Street View images)
+                image_number = i + 1
+                filename = f"{image_number}.jpg"
+                filepath = f"{session_dir}/{filename}"
+                
+                # Save the image
+                with open(filepath, 'wb') as f:
+                    f.write(result['imageBuffer'])
+                
+                image_data = {
+                    'angle': request.angles[i],
+                    'filepath': filepath,
+                    'url': result['url'],
+                    'success': True
+                }
+                
+                saved_images.append(image_data)
+                
+                print(f"✅ {request.angles[i]}°: Saved to {filepath}")
+            else:
+                print(f"❌ {request.angles[i]}°: {result['error']}")
+                saved_images.append({
+                    'angle': request.angles[i],
+                    'success': False,
+                    'error': result['error']
+                })
+        
+        # Step 2: Process the first successful image with AI
+        successful_images = [img for img in saved_images if img['success']]
+        
+        if not successful_images:
+            raise HTTPException(status_code=400, detail="No Street View images were captured successfully")
+        
+        # Use the first successful image for AI processing
+        selected_image = successful_images[0]
+        print(f"\n🎯 Selected image for AI processing: {selected_image['angle']}°")
+        
+        # Process with AI
+        print(f"🤖 Processing image with AI: {request.prompt}")
+        ai_processed_path = process_image_with_prompt(selected_image['filepath'], request.prompt)
+        print(f"✅ AI processing complete: {ai_processed_path}")
+        
+        # Copy AI processed image to session directory as 1.jpg (replacing the original)
+        ai_session_path = f"{session_dir}/1.jpg"
+        shutil.copy2(ai_processed_path, ai_session_path)
+
+        base64_encoded_image = encode_image_to_base64(ai_session_path)
+        
+        # Return results
         return {
             "session_id": session_id,
             "status": "completed",
+            "address": request.address,
+            "prompt": request.prompt,
             "results": {
-                "person_added": results.get('person_added', ''),
-                "composite": results.get('composite', ''),
-                "final_swap": results.get('final_swap', '')
+                "images": [
+                    {
+                        "number": i + 1,
+                        "angle": img['angle'],
+                        "filepath": img['filepath'],
+                        "success": img['success'],
+                        "ai_processed": i == 0  # First image is AI processed
+                    } for i, img in enumerate(saved_images)
+                ],
+                "total_captured": len(successful_images)
             }
         }
         
     except Exception as e:
-        logger.error(f"Error processing images: {str(e)}")
+        logger.error(f"Error processing streetview: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
-@app.get("/download/{session_id}/{file_type}")
-async def download_result(session_id: str, file_type: str):
+@app.get("/download/{session_id}/{image_number}")
+async def download_image(session_id: str, image_number: str):
     """
-    Download a specific result file from a processing session
+    Download a specific image from a processing session
     
     - **session_id**: The session ID from processing
-    - **file_type**: Type of file to download (person_added, composite, final_swap)
+    - **image_number**: Image number (1, 2, 3, 4) - where 1 is AI processed
     """
     try:
-        # Validate file type
-        valid_types = ["person_added", "composite", "final_swap"]
-        if file_type not in valid_types:
-            raise HTTPException(status_code=400, detail=f"Invalid file type. Must be one of: {valid_types}")
-        
         # Construct file path
-        file_path = f"output/{session_id}/{file_type}.jpg"
+        file_path = f"output/{session_id}/{image_number}.jpg"
         
         if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail=f"File not found: {file_type}")
+            raise HTTPException(status_code=404, detail=f"Image not found: {image_number}")
         
         return FileResponse(
             path=file_path,
-            filename=f"{file_type}_{session_id}.jpg",
+            filename=f"{image_number}_{session_id}.jpg",
             media_type="image/jpeg"
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error downloading file: {str(e)}")
+        logger.error(f"Error downloading image: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 @app.get("/sessions/{session_id}")
@@ -152,11 +208,11 @@ async def get_session_info(session_id: str):
         if not os.path.exists(session_dir):
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # Check which files exist
-        files = {}
-        for file_type in ["person_added", "composite", "final_swap"]:
-            file_path = f"{session_dir}/{file_type}.jpg"
-            files[file_type] = os.path.exists(file_path)
+        # List all files in session directory
+        files = []
+        for filename in os.listdir(session_dir):
+            if filename.endswith('.jpg'):
+                files.append(filename)
         
         return {
             "session_id": session_id,

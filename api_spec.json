@@ -1,0 +1,304 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Image Processing API",
+        "description": "API for staged image merging and person swapping",
+        "version": "1.0.0"
+    },
+    "paths": {
+        "/": {
+            "get": {
+                "summary": "Root",
+                "description": "Health check endpoint",
+                "operationId": "root__get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "summary": "Health Check",
+                "description": "Detailed health check",
+                "operationId": "health_check_health_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/process-images": {
+            "post": {
+                "summary": "Process Images",
+                "description": "Process images through the staged merge pipeline\n\n- **background_image**: The background/scene image\n- **person_image**: The person source image\n- **add_person_prompt**: Prompt for adding person to background\n- **composite_prompt**: Prompt for creating side-by-side composite\n- **swap_prompt**: Prompt for swapping person appearance",
+                "operationId": "process_images_process_images_post",
+                "parameters": [
+                    {
+                        "name": "add_person_prompt",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "Add a realistic person to this scene in a natural pose. The person should be doing something interesting but believable. Keep the background, lighting, and environment exactly as they are. Only add the person, do not change anything else in the image.",
+                            "title": "Add Person Prompt"
+                        }
+                    },
+                    {
+                        "name": "composite_prompt",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "Create a side-by-side comparison by placing the first image on the left and the second image on the right, with equal spacing and the same height. Make it look like a before/after or comparison layout.",
+                            "title": "Composite Prompt"
+                        }
+                    },
+                    {
+                        "name": "swap_prompt",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "This is a side-by-side composite image. I need you to: 1) Take the person's appearance from the RIGHT side image, 2) Apply that person's appearance to the person on the LEFT side, 3) Keep the LEFT side background, pose, and scene exactly as they are, 4) Only change the person's appearance, not the environment, 5) Return ONLY the left side image with the updated person. The result should be the left side scene with the right side person's appearance.",
+                            "title": "Swap Prompt"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/Body_process_images_process_images_post"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/download/{session_id}/{file_type}": {
+            "get": {
+                "summary": "Download Result",
+                "description": "Download a specific result file from a processing session\n\n- **session_id**: The session ID from processing\n- **file_type**: Type of file to download (person_added, composite, final_swap)",
+                "operationId": "download_result_download__session_id___file_type__get",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Session Id"
+                        }
+                    },
+                    {
+                        "name": "file_type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "File Type"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}": {
+            "get": {
+                "summary": "Get Session Info",
+                "description": "Get information about a processing session\n\n- **session_id**: The session ID to query",
+                "operationId": "get_session_info_sessions__session_id__get",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Session Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete Session",
+                "description": "Delete a processing session and all its files\n\n- **session_id**: The session ID to delete",
+                "operationId": "delete_session_sessions__session_id__delete",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Session Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "Body_process_images_process_images_post": {
+                "properties": {
+                    "background_image": {
+                        "type": "string",
+                        "format": "binary",
+                        "title": "Background Image"
+                    },
+                    "person_image": {
+                        "type": "string",
+                        "format": "binary",
+                        "title": "Person Image"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "background_image",
+                    "person_image"
+                ],
+                "title": "Body_process_images_process_images_post"
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
+    }
+}
